@@ -1,0 +1,190 @@
+---
+output: 
+  pdf_document:
+    keep_tex: yes
+    fig_caption: yes
+    number_sections: yes
+geometry: margin=2.54cm
+title: Assessing phytoplankton abundance in North Temperate Lakes
+subtitle: https://github.com/Sylvia-C/872_Final.git
+author: Siying Chen
+abstract: "Phytoplankton growth depends on the availability of carbon dioxide, sunlight, and nutrients. This project uses data from studies on several lakes in the North Temperate Lakes District in Wisconsin, USA as part of the Long Term Ecological Research station established by the National Science Foundation. The purpose of this project is to find out the relationship between phytoplankton abundance (biovolume) and nutrients (nitrogen and phosphorus) using regression analysis. There are 2 datasets used in this project, which are the nutrients dataset and phytoplankton dataset of the lakes."
+fontsize: 12pt
+mainfont: Times New Roman
+editor_options: 
+  chunk_output_type: console
+---
+<Information in these brackets are used for annotating the RMarkdown file. They will not appear in the final version of the PDF document>
+
+\newpage
+\tableofcontents 
+\newpage
+\listoftables 
+
+\newpage
+\listoffigures 
+{r Figure 1, echo =F, fig.cap="x"}
+{r Figure 2, echo =F, fig.cap="x"}
+{r Figure 3, echo =F, fig.cap="x"}
+{r Figure 4, echo =F, fig.cap="x"}
+{r Figure 5, echo =F, fig.cap="x"}
+{r Figure 6, echo =F, fig.cap="x"}
+\newpage
+
+<Setup the global options for the R chunks in your document>
+
+<Note: set up autoreferencing for figures and tables in your document>
+
+```{r setup, include=FALSE}
+# Set working directory
+getwd()
+
+# Load packages
+library(tidyverse)
+library(RColorBrewer)
+library(lubridate)
+library(nlme)
+library(lsmeans)
+library(multcompView)
+library(trend)
+library(knitr)
+
+# Set ggplot theme
+mytheme <- theme_bw(base_size = 14) +
+  theme(axis.text = element_text(color = "black"), 
+        legend.position = "bottom",
+        panel.grid.major = element_line(size = 0.5, linetype = 'solid'), 
+        panel.grid.minor = element_line(size = 0.25, linetype = 'dashed'),
+        title = element_text(face = "bold"))
+theme_set(mytheme)
+```
+
+
+# Research Question and Rationale
+<Paragraph detailing the rationale for your analysis. What is the significant application and/or interest in this topic? Connect to environmental topic(s)/challenge(s).>
+
+Phytoplankton growth depends on the availability of carbon dioxide, sunlight, and nutrients. Like other plants, phytoplanktons require nutrients like nitrogen and phosphorus to survive. In this project, I would like to look at total nitrogen and total phosphorus concentration and see how they interact with phytoplankton abundance, which was measured in biovolume. This project can help peole to understand the relationship between phytoplankton growth and the concentration of nutrients like nitrogen and phosphorus at North Temperate Lakes. 
+
+<Paragraph detailing your research question(s) and goals. What do you want to find out? Include a sentence (or a few) on the dataset you are using to answer this question - just enough to give your reader an idea of where you are going with the analysis.>
+
+Due to data availability, we will only be looking at East Long Lake, Paul Lake, Peter Lake, Tuesday Lake, and West Long Lake. For this project, I'll be focusing on the division level of phytoplankton abundance, which are measured in biovolume in millimeter cubed per liter. I'll sum up the total biovolume of different phytoplankton division at each lake on each data. For nutrients data, since the nutrient concentration was collected at different depth, I'll use the median concentration for each lake on each date to avoid outliers.
+The research question for this project are:
+1. How total nitrogen concentration affect the abundance of phytoplankton in these 5 lakes?
+2. How total phosphorus concentration affect the abundance of phytoplankton in these 5 lakes?
+
+\newpage
+
+# Dataset Information
+<Information on how the dataset for this analysis were collected, the data contained in the dataset, and any important pieces of information that are relevant to your analyses. This section should contain much of same information as the README file for the dataset but formatted in a way that is more narrative.>
+
+Nutrient data were collected from 1991-2016. They are usually collected in the morning and collected at different depth. Chemical measurements are collected in several ways: pooled mixed layer sample (PML), epilimnion, metalimnion, and hypolimnion, or vertical profiles. On each sampling date, there are up to seven samples due to Van Dorn collections across a depth interval according to percent irradiance. Nutrient samples were sent to the Cary Institute of Ecosystem Studies for analysis beginning in 2000. The Kjeldahl method for measuring nitrogen is not used at IES, and so measurements reported from 2000 onwards are Total Nitrogen.
+
+Data on epilimnetic phytoplankton were collected from 1984-2015, determined by light microscopy from pooled Van Dorn samples at 100 percent, 50 percent, and 25 percent of surface irradiance. Samples collected after 1995 were counted by Phycotech Inc. Sampling were conducted at 5 lakes and the frequency varies. Data include taxonomic information and split into distinct columns of genus, species and description for archival as best possible.
+
+<Add a table that summarizes your data structure. This table can be made in markdown text or inserted as a `kable` function in an R chunk. If the latter, do not include the code used to generate your table.>
+
+Dataset       | Data Column                                                  | Unit
+--------------|--------------------------------------------------------------|---------------------------
+Nutrients     | Total nitrogen concentration, total phosphorus concentration | Micrograms Per Liter
+Phytoplankton | Total biovolume                                              | Millimeter Cubed Per Liter
+
+\newpage
+
+# Exploratory Data Analysis and Wrangling
+<Include R chunks for 5+ lines of summary code (display code and output), 3+ exploratory graphs (display graphs only), and any wrangling you do to your dataset(s).> 
+
+<Include text sections to accompany these R chunks to explain the reasoning behind your workflow, and the rationale for your approach.>
+
+```{r Exploratory Data Analysis and Wrangling}
+# Read in datasets as dataframe
+nutrients <- read.csv("./Raw/NTL-LTER_Lake_Nutrients_Raw.csv")
+phytoplankton <- read.csv("./Raw/NTL-LTER_Lake_Phytoplankton_Raw.csv")
+
+# Format sampledate as date
+nutrients$sampledate <- 
+  as.Date(nutrients$sampledate, format = "%m/%d/%y")
+phytoplankton$sampledate <- 
+  as.Date(phytoplankton$sampledate, format = "%Y-%m-%d")
+
+# Select and filter dataframe to slim the data
+nutrients_slim <- nutrients %>%
+  select(lakename, sampledate, depth, tn_ug, tp_ug) %>%
+  na.omit() %>%
+  group_by(lakename, sampledate) %>%
+  summarize(medianTN = median(tn_ug),
+            medianTP = median(tp_ug))
+
+phytoplankton_slim <- phytoplankton %>%
+  select(lakename, sampledate, division, total_biovol) %>%
+  group_by(lakename, sampledate, division) %>%
+  summarize(biomass = sum(total_biovol))
+
+# Join datasets
+biomass_nutrients <- phytoplankton_slim %>%
+  summarize(tot_biomass = sum(biomass)) %>%
+  left_join(nutrients_slim, by = c("lakename" = "lakename", "sampledate" = "sampledate")) %>%
+  na.omit()
+#colnames(biomass_nutrients) <- c("Lake Name", "Sample Date", "Biomass", "Median TN", "Median TP")
+
+# Summary statistics
+head(phytoplankton_slim)
+colnames(phytoplankton_slim)
+dim(phytoplankton_slim)
+summary(phytoplankton_slim)
+
+head(biomass_nutrients)
+colnames(biomass_nutrients)
+dim(biomass_nutrients)
+summary(biomass_nutrients)
+```
+
+```{r Figure 1, fig.height = 6, fig.width = 7, echo = F}
+# Overall biomass graph shows the distribution of biomass by phytoplankton division
+division_biomass <- ggplot(phytoplankton_slim, aes(x = division, y = biomass, color = division)) +
+  geom_violin() +
+  labs(x = "Phytoplankton Division", y = expression(paste("Biomass ("*"mm"^"3"*"/L)"))) +
+  theme(axis.text.x = element_blank())
+print(division_biomass)
+```
+
+```{r Figure 2, fig.height = 6, fig.width = 7, echo = F}
+# Temporal biomass graph shows the overall biomass over time
+temporal_biomass <- ggplot(phytoplankton_slim, aes(x = sampledate, y = biomass, color = division)) +
+  geom_smooth() +
+  labs(x = "Sample Date", y = expression(paste("Biomass ("*"mm"^"3"*"/L)")))
+print(temporal_biomass)
+```
+
+```{r Figure 3, fig.height = 6, fig.width = 7, echo = F}
+# Biomass distribution by lake
+lake_biomass <- ggplot(phytoplankton_slim, aes(x = lakename, y = biomass, fill = division)) +
+  geom_boxplot() +
+  facet_wrap(~lakename, nrow = 1, scales = "free_x") +
+  ylim(0,2) +
+  labs(x = "Lake Name", y = expression(paste("Biomass ("*"mm"^"3"*"/L)"))) +
+  theme(axis.text.x = element_blank(), axis.title.x = element_blank())
+print(lake_biomass)
+```
+\newpage
+
+# Analysis
+<Include R chunks for 3+ statistical tests (display code and output) and 3+ final visualization graphs (display graphs only).>
+
+<Include text sections to accompany these R chunks to explain the reasoning behind your workflow, rationale for your approach, and the justification of meeting or failing to meet assumptions of tests.>
+
+```{r Analysis}
+# Evaluate assumption of normal distribution
+shapiro.test(biomass_nutrients$tot_biomass) # less than 0.05, not normally distributed
+qqnorm(biomass_nutrients$tot_biomass); qqline(biomass_nutrients$tot_biomass)
+
+#
+```
+
+\newpage
+
+# Summary and Conclusions
+<Summarize your major findings from your analyses. What conclusions do you draw from your findings? Make sure to apply this to a broader application for the research question you have answered.>
+
+Overall,
+
+
